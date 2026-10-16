@@ -4,10 +4,78 @@ import { CLINIC } from './config.js';
 import logoUrl from './assets/logo.png';
 import LeadForm from './components/LeadForm.jsx';
 import CallPopup from './components/CallPopup.jsx';
+import FormPopup from './components/FormPopup.jsx';
 import Strands from './components/Strands.jsx';
 import Gallery from './components/Gallery.jsx';
 
 const NAV = [['Treatments', '#treatments'], ['Concerns', '#concerns'], ['Process', '#process'], ['FAQ', '#faq'], ['Contact', '#contact']];
+
+// Path-based section URLs: /concerns instead of /#concerns.
+const HEADER_OFFSET = 80;
+const SECTION_IDS = ['top', 'concerns', 'treatments', 'process', 'faq', 'contact'];
+const NAV_IDS = NAV.map(([, h]) => h.slice(1));
+let lockUntil = 0; // pause scroll-spy while a click-triggered smooth scroll runs
+
+const sectionFromPath = () => {
+  const last = window.location.pathname.split('/').filter(Boolean).pop();
+  return SECTION_IDS.includes(last) ? last : null;
+};
+// Directory the app is served from, with any trailing section segment removed.
+const baseDir = () => {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (SECTION_IDS.includes(parts[parts.length - 1])) parts.pop();
+  return '/' + parts.join('/') + (parts.length ? '/' : '');
+};
+const pathFor = (id) => (id === 'top' || !id ? baseDir() : baseDir() + id);
+
+const scrollToSection = (id, smooth = true) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const y = id === 'top' ? 0 : el.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET + 1;
+  window.scrollTo({ top: y, behavior: smooth ? 'smooth' : 'auto' });
+};
+
+const goTo = (e, id, after) => {
+  e.preventDefault();
+  lockUntil = Date.now() + 900;
+  window.history.pushState(null, '', pathFor(id));
+  window.dispatchEvent(new Event('sectionchange'));
+  scrollToSection(id);
+  after?.();
+};
+
+function useActiveSection() {
+  const [active, setActive] = useState(() => sectionFromPath() || 'top');
+  useEffect(() => {
+    const sync = () => setActive(sectionFromPath() || 'top');
+    const spy = () => {
+      if (Date.now() < lockUntil) return;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      let cur = 'top';
+      for (const id of SECTION_IDS) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= HEADER_OFFSET + 40) cur = id;
+      }
+      if (atBottom) cur = 'contact';
+      setActive(cur);
+      const next = pathFor(cur);
+      if (window.location.pathname !== next) window.history.replaceState(null, '', next);
+    };
+    const onPop = () => { sync(); const id = sectionFromPath(); lockUntil = Date.now() + 900; scrollToSection(id || 'top'); };
+    window.addEventListener('scroll', spy, { passive: true });
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('sectionchange', sync);
+    // Deep link: open straight at the section named in the path.
+    const initial = sectionFromPath();
+    if (initial && initial !== 'top') requestAnimationFrame(() => scrollToSection(initial, false));
+    return () => {
+      window.removeEventListener('scroll', spy);
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('sectionchange', sync);
+    };
+  }, []);
+  return active;
+}
 
 const CONCERNS = [
   ['Acne & breakouts', 'Explore treatment options for active acne and recurring breakouts.'],
@@ -61,6 +129,7 @@ const Heading = ({ eyebrow, children, className = '' }) => (
 function Header() {
   const [open, setOpen] = useState(false);
   const [solid, setSolid] = useState(false);
+  const active = useActiveSection();
   useEffect(() => {
     const on = () => setSolid(window.scrollY > 20);
     on(); window.addEventListener('scroll', on, { passive: true });
@@ -70,11 +139,14 @@ function Header() {
     <header className="fixed inset-x-0 top-0 z-40">
       <div className={`w-full border-b bg-white/95 backdrop-blur transition-shadow duration-300 ${solid || open ? 'border-line shadow-soft' : 'border-line/60'}`}>
         <div className="flex h-20 w-full items-center justify-between px-4 xs:px-5 sm:px-8 lg:px-12">
-          <a href="#top" className="flex items-center" aria-label={`${CLINIC.name} home`}>
+          <a href={pathFor('top')} onClick={(e) => goTo(e, 'top')} className="flex items-center" aria-label={`${CLINIC.name} home`}>
             <img src={logoUrl} alt={CLINIC.name} className="h-10 w-auto sm:h-12" />
           </a>
           <nav className="hidden items-center gap-8 text-sm font-medium text-ink-soft lg:flex" aria-label="Primary">
-            {NAV.map(([l, h]) => <a key={h} href={h} className="relative transition hover:text-crimson-700 after:absolute after:-bottom-1 after:left-0 after:h-px after:w-0 after:bg-crimson-700 after:transition-all hover:after:w-full">{l}</a>)}
+            {NAV.map(([l, h]) => {
+              const on = active === h.slice(1);
+              return <a key={h} href={pathFor(h.slice(1))} onClick={(e) => goTo(e, h.slice(1))} aria-current={on ? 'true' : undefined} className={`relative transition hover:text-crimson-700 after:absolute after:-bottom-1 after:left-0 after:h-px after:bg-crimson-700 after:transition-all hover:after:w-full ${on ? 'text-crimson-700 after:w-full' : 'after:w-0'}`}>{l}</a>;
+            })}
           </nav>
           <div className="flex items-center gap-3">
             {CLINIC.phone && <a href={`tel:${CLINIC.phone}`} className="hidden items-center gap-2 text-sm font-medium text-ink md:flex"><Phone size={16} className="text-crimson-700" aria-hidden />{CLINIC.phoneDisplay}</a>}
@@ -86,7 +158,7 @@ function Header() {
         </div>
         {open && (
           <nav className="border-t border-line px-5 pb-5 lg:hidden" aria-label="Mobile">
-            {NAV.map(([l, h]) => <a key={h} href={h} onClick={() => setOpen(false)} className="block border-b border-line py-3 font-medium text-ink">{l}</a>)}
+            {NAV.map(([l, h]) => <a key={h} href={pathFor(h.slice(1))} onClick={(e) => goTo(e, h.slice(1), () => setOpen(false))} aria-current={active === h.slice(1) ? 'true' : undefined} className={`block border-b border-line py-3 font-medium ${active === h.slice(1) ? 'text-crimson-700' : 'text-ink'}`}>{l}</a>)}
             <div className="mt-4 flex flex-col gap-3">
               <a href="#book" onClick={() => setOpen(false)} className={btnSolid}>Book consultation</a>
               {CLINIC.phone && <a href={`tel:${CLINIC.phone}`} className={btnGhost}><Phone size={18} aria-hidden />Call {CLINIC.phoneDisplay}</a>}
@@ -297,7 +369,7 @@ function Footer() {
         </div>
         <nav className="flex flex-col gap-2 text-sm font-medium" aria-label="Footer">
           <p className="mb-1 text-xs font-medium uppercase tracking-[0.22em] text-white">Explore</p>
-          {NAV.filter(([, h]) => h !== '#contact').map(([l, h]) => <a key={h} href={h} className="transition hover:underline">{l}</a>)}
+          {NAV.filter(([, h]) => h !== '#contact').map(([l, h]) => <a key={h} href={pathFor(h.slice(1))} onClick={(e) => goTo(e, h.slice(1))} className="transition hover:underline">{l}</a>)}
           {CLINIC.privacyUrl && <a href={CLINIC.privacyUrl} className="transition hover:underline">Privacy policy</a>}
         </nav>
       </div>
@@ -321,6 +393,7 @@ export default function App() {
         <FinalCta />
       </main>
       <Footer />
+      <FormPopup />
       <CallPopup />
     </>
   );

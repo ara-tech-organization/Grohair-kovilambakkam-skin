@@ -34,7 +34,7 @@ export const FORM = {
       date: na(v.date),
       time: 'N/A',
       treatment: na(v.concern) !== 'N/A' ? v.concern.trim() : FORM.treatment,
-      message: 'N/A',
+      message: v.city && v.city.trim() ? `City: ${v.city.trim()}` : 'N/A',
       source: 'skin-landing-kovilambakkam',
     };
   },
